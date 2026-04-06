@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 13px;
+      color: var(--figma-color-text, #333);
+      background: var(--figma-color-bg, #fff);
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
+    .container { padding: 16px; padding-bottom: 24px; }
+    h2 {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .subtitle {
+      font-size: 12px;
+      color: var(--figma-color-text-secondary, #888);
+      margin-bottom: 20px;
+    }
+    .drop-zone {
+      border: 2px dashed var(--figma-color-border, #ddd);
+      border-radius: 12px;
+      padding: 40px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-bottom: 20px;
+    }
+    .drop-zone:hover, .drop-zone.dragover {
+      border-color: var(--figma-color-bg-brand, #667eea);
+      background: var(--figma-color-bg-hover, #f5f5ff);
+    }
+    .drop-zone .icon {
+      font-size: 32px;
+      margin-bottom: 8px;
+    }
+    .drop-zone .label {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .drop-zone .hint {
+      font-size: 11px;
+      color: var(--figma-color-text-secondary, #888);
+    }
+    .drop-zone input {
+      display: none;
+    }
+    .section {
+      margin-bottom: 20px;
+    }
+    .section-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--figma-color-text-secondary, #888);
+      margin-bottom: 8px;
+    }
+    .device-selector {
+      display: flex;
+      gap: 8px;
+    }
+    .device-btn {
+      flex: 1;
+      padding: 10px 8px;
+      border: 1px solid var(--figma-color-border, #ddd);
+      border-radius: 8px;
+      background: var(--figma-color-bg, #fff);
+      color: var(--figma-color-text, #333);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.2s;
+    }
+    .device-btn:hover {
+      border-color: var(--figma-color-bg-brand, #667eea);
+    }
+    .device-btn.active {
+      border-color: var(--figma-color-bg-brand, #667eea);
+      background: var(--figma-color-bg-brand-hover, #f0f0ff);
+      color: var(--figma-color-bg-brand, #667eea);
+      font-weight: 600;
+    }
+    .device-btn .dim {
+      font-size: 10px;
+      color: var(--figma-color-text-secondary, #888);
+      margin-top: 2px;
+    }
+    .import-btn {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 8px;
+      background: var(--figma-color-bg-brand, #667eea);
+      color: #fff;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    .import-btn:hover { opacity: 0.9; }
+    .import-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .file-info {
+      padding: 12px;
+      border-radius: 8px;
+      background: var(--figma-color-bg-secondary, #f5f5f5);
+      margin-bottom: 16px;
+      display: none;
+    }
+    .file-info.visible { display: block; }
+    .file-info .filename {
+      font-weight: 600;
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+    .file-info .meta {
+      font-size: 11px;
+      color: var(--figma-color-text-secondary, #888);
+    }
+    .status {
+      padding: 12px;
+      border-radius: 8px;
+      margin-top: 12px;
+      display: none;
+      text-align: center;
+    }
+    .status.visible { display: block; }
+    .status.processing {
+      background: var(--figma-color-bg-secondary, #f5f5f5);
+    }
+    .status.success {
+      background: #e6ffe6;
+      color: #2a7a2a;
+    }
+    .status.error {
+      background: #ffe6e6;
+      color: #cc3333;
+    }
+    .progress-bar {
+      height: 4px;
+      background: var(--figma-color-border, #ddd);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+    .progress-fill {
+      height: 100%;
+      background: var(--figma-color-bg-brand, #667eea);
+      border-radius: 2px;
+      transition: width 0.3s;
+      width: 0%;
+    }
+    .mcp-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: var(--figma-color-bg-secondary, #f5f5f5);
+      font-size: 10px;
+      color: var(--figma-color-bg-brand, #667eea);
+      font-weight: 600;
+      margin-left: 8px;
+      vertical-align: middle;
+    }
+    .screenshot-preview {
+      width: 100%;
+      max-height: 160px;
+      object-fit: contain;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      display: none;
+    }
+    .screenshot-preview.visible { display: block; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Web2Fig <span class="mcp-badge">MCP</span></h2>
+    <p class="subtitle">Import web page captures as editable Figma designs</p>
+
+    <div class="drop-zone" id="drop-zone">
+      <div class="icon">📁</div>
+      <div class="label">Drop .w2f file here</div>
+      <div class="hint">or click to browse</div>
+      <input type="file" id="file-input" accept=".w2f,.json">
+    </div>
+
+    <img class="screenshot-preview" id="screenshot-preview" />
+
+    <div class="file-info" id="file-info">
+      <div class="filename" id="file-name"></div>
+      <div class="meta" id="file-meta"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Import As</div>
+      <div class="device-selector">
+        <button class="device-btn active" data-device="desktop">
+          🖥 Desktop<div class="dim">1440px</div>
+        </button>
+        <button class="device-btn" data-device="tablet">
+          📱 Tablet<div class="dim">768px</div>
+        </button>
+        <button class="device-btn" data-device="mobile">
+          📲 Mobile<div class="dim">375px</div>
+        </button>
+      </div>
+    </div>
+
+    <button class="import-btn" id="import-btn" disabled>Import to Figma</button>
+
+    <div class="status" id="status">
+      <div id="status-text"></div>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progress-fill"></div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

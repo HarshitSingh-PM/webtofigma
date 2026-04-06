@@ -1,0 +1,20 @@
+{
+  "name": "Web2Fig — Import Web Pages",
+  "id": "web2fig-plugin",
+  "api": "1.0.0",
+  "main": "dist/plugin.js",
+  "ui": "dist/ui.html",
+  "documentAccess": "dynamic-page",
+  "editorType": ["figma"],
+  "networkAccess": {
+    "allowedDomains": ["*"],
+    "reasoning": "Required to fetch web fonts and images referenced in captured designs"
+  },
+  "capabilities": [],
+  "permissions": [],
+  "menu": [
+    { "name": "Import .w2f File", "command": "import" },
+    { "separator": true },
+    { "name": "About Web2Fig", "command": "about" }
+  ]
+}

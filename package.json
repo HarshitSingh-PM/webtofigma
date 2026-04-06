@@ -1,0 +1,24 @@
+{
+  "name": "web2fig",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Convert any web page to Figma design — Chrome Extension + Figma Plugin + MCP Server",
+  "workspaces": [
+    "shared",
+    "chrome-extension",
+    "figma-plugin",
+    "mcp-server"
+  ],
+  "scripts": {
+    "build": "npm run build:shared && npm run build:chrome && npm run build:figma && npm run build:mcp",
+    "build:shared": "cd shared && npm run build",
+    "build:chrome": "cd chrome-extension && npm run build",
+    "build:figma": "cd figma-plugin && npm run build",
+    "build:mcp": "cd mcp-server && npm run build",
+    "dev:chrome": "cd chrome-extension && npm run dev",
+    "dev:figma": "cd figma-plugin && npm run dev",
+    "dev:mcp": "cd mcp-server && npm run dev",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "license": "MIT"
+}

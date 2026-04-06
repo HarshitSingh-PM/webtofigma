@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "web2fig": {
+      "command": "node",
+      "args": ["/Users/harshitsingh/web2fig/mcp-server/dist/index.js"],
+      "description": "Web2Fig — Capture web pages and convert them to Figma designs. Supports headless capture, device-responsive imports, and direct Figma plugin integration."
+    }
+  }
+}
