@@ -373,10 +373,9 @@ async function renderImageToPNG(tabId: number, url: string): Promise<string | nu
               c.height = h;
               var ctx = c.getContext('2d');
               ctx.drawImage(img, 0, 0, w, h);
-              // Use JPEG for large images to reduce size
-              var format = (w * h > 1000000) ? 'image/jpeg' : 'image/png';
-              var quality = (format === 'image/jpeg') ? 0.85 : undefined;
-              resolve(c.toDataURL(format, quality));
+              // Always use PNG — JPEG canvas output can produce
+              // corrupt data for WebP/AVIF source images
+              resolve(c.toDataURL('image/png'));
             } catch(e) { resolve(null); }
           };
           img.onerror = function() { resolve(null); };
@@ -501,10 +500,33 @@ async function fetchWithServiceWorker(url: string): Promise<string | null> {
       const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
       binary += String.fromCharCode.apply(null, Array.from(chunk));
     }
-    return `data:${guessMimeType(url)};base64,${btoa(binary)}`;
+    const base64Data = btoa(binary);
+    // Detect actual format from magic bytes (content-type header can lie)
+    const actualMime = detectMimeFromBytes(bytes);
+    return `data:${actualMime};base64,${base64Data}`;
   } catch {
     return null;
   }
+}
+
+/** Detect actual image MIME type from file magic bytes */
+function detectMimeFromBytes(bytes: Uint8Array): string {
+  if (bytes.length < 4) return 'image/png';
+  // PNG: 89 50 4E 47
+  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) return 'image/png';
+  // JPEG: FF D8 FF
+  if (bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF) return 'image/jpeg';
+  // GIF: 47 49 46
+  if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) return 'image/gif';
+  // WebP: 52 49 46 46 (RIFF)
+  if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46) return 'image/webp';
+  // AVIF/HEIF: 00 00 00 xx 66 74 79 70
+  if (bytes.length > 8 && bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70) return 'image/avif';
+  // BMP: 42 4D
+  if (bytes[0] === 0x42 && bytes[1] === 0x4D) return 'image/bmp';
+  // TIFF: 49 49 or 4D 4D
+  if ((bytes[0] === 0x49 && bytes[1] === 0x49) || (bytes[0] === 0x4D && bytes[1] === 0x4D)) return 'image/tiff';
+  return 'image/png'; // Default
 }
 
 function guessMimeType(url: string): string {
