@@ -167,21 +167,41 @@ export class CaptureEngine {
       document.documentElement.scrollHeight,
     );
     const viewportHeight = window.innerHeight;
-    const scrollStep = viewportHeight * 0.8;
+    const scrollStep = viewportHeight * 0.5; // Smaller steps for better lazy-load trigger
 
-    // Scroll down in steps
+    // Pass 1: Scroll down slowly to trigger IntersectionObserver-based lazy loading
     for (let y = 0; y < totalHeight; y += scrollStep) {
       window.scrollTo(0, y);
-      await new Promise((r) => setTimeout(r, 150));
+      await new Promise((r) => setTimeout(r, 300)); // Wait longer for images to start loading
     }
-    // Scroll to bottom
     window.scrollTo(0, totalHeight);
-    await new Promise((r) => setTimeout(r, 300));
+    await new Promise((r) => setTimeout(r, 500));
 
-    // Scroll back to top — use instant behavior and verify
+    // Pass 2: Scroll back up slowly — some sites lazy-load on scroll up too
+    for (let y = totalHeight; y >= 0; y -= scrollStep * 2) {
+      window.scrollTo(0, y);
+      await new Promise((r) => setTimeout(r, 200));
+    }
+
+    // Force all lazy images to load by setting their src from data-src
+    try {
+      const lazyImages = document.querySelectorAll('img[data-src], img[data-lazy], img[loading="lazy"]');
+      lazyImages.forEach((img: Element) => {
+        const htmlImg = img as HTMLImageElement;
+        const dataSrc = htmlImg.getAttribute('data-src') || htmlImg.getAttribute('data-lazy');
+        if (dataSrc && !htmlImg.src) {
+          htmlImg.src = dataSrc;
+        }
+        // Remove loading=lazy to force immediate load
+        htmlImg.removeAttribute('loading');
+      });
+      // Wait for images to load
+      await new Promise((r) => setTimeout(r, 1500));
+    } catch { /* */ }
+
+    // Scroll back to top
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
     await new Promise((r) => setTimeout(r, 300));
-    // Force scroll to 0 if smooth scrolling prevented instant
     if (window.scrollY !== 0) {
       document.documentElement.scrollTop = 0;
       document.body.scrollTop = 0;
