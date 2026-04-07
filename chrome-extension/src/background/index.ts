@@ -289,27 +289,37 @@ async function fetchImageData(
           frameId,
           url: absoluteUrl,
         });
-        if (result && result.content) {
-          if (result.base64Encoded) {
-            const mime = guessMimeType(absoluteUrl);
-            // If unsupported format, try canvas conversion
-            if (mime === 'image/webp' || mime === 'image/avif' || mime === 'image/svg+xml') {
-              const converted = await renderImageToPNG(tabId, absoluteUrl);
-              if (converted) return converted;
-            }
+        if (result && result.content && result.base64Encoded) {
+          const mime = guessMimeType(absoluteUrl);
+          // Only return Figma-supported formats directly
+          if (mime === 'image/png' || mime === 'image/jpeg' || mime === 'image/gif') {
             return `data:${mime};base64,${result.content}`;
           }
+          // Unsupported format — convert via canvas using the data URI
+          const dataUri = `data:${mime};base64,${result.content}`;
+          const converted = await renderImageToPNG(tabId, dataUri);
+          if (converted) return converted;
         }
       } catch { /* fall through */ }
     }
   }
 
-  // Fallback 2: Service worker fetch
+  // Fallback 2: Service worker fetch + convert if unsupported
   try {
-    return await fetchWithServiceWorker(absoluteUrl);
-  } catch {
-    return null;
-  }
+    const fetched = await fetchWithServiceWorker(absoluteUrl);
+    if (fetched) {
+      const mimeMatch = fetched.match(/^data:([^;]+)/);
+      const mime = mimeMatch ? mimeMatch[1] : '';
+      if (mime === 'image/png' || mime === 'image/jpeg' || mime === 'image/gif') {
+        return fetched;
+      }
+      // Unsupported format — convert via canvas
+      const converted = await renderImageToPNG(tabId, fetched);
+      if (converted) return converted;
+    }
+  } catch { /* */ }
+
+  return null;
 }
 
 /**
@@ -322,19 +332,26 @@ async function renderImageToPNG(tabId: number, url: string): Promise<string | nu
     const result = await cdpSend(tabId, 'Runtime.evaluate', {
       expression: `
         new Promise(function(resolve) {
+          var url = ${JSON.stringify(url)};
           var img = new Image();
-          img.crossOrigin = 'anonymous';
+          // Only set crossOrigin for http URLs, not for data URIs
+          if (url.indexOf('http') === 0) {
+            img.crossOrigin = 'anonymous';
+          }
           img.onload = function() {
             try {
               var w = img.naturalWidth || img.width || 1;
               var h = img.naturalHeight || img.height || 1;
-              // Limit canvas size to prevent memory issues (max 4096px per side)
+              // Limit canvas size (max 4096px per side)
               var maxDim = 4096;
               if (w > maxDim || h > maxDim) {
                 var scale = Math.min(maxDim / w, maxDim / h);
                 w = Math.round(w * scale);
                 h = Math.round(h * scale);
               }
+              // Minimum 1x1
+              w = Math.max(1, w);
+              h = Math.max(1, h);
               var c = document.createElement('canvas');
               c.width = w;
               c.height = h;
@@ -347,7 +364,7 @@ async function renderImageToPNG(tabId: number, url: string): Promise<string | nu
             } catch(e) { resolve(null); }
           };
           img.onerror = function() { resolve(null); };
-          img.src = ${JSON.stringify(url)};
+          img.src = url;
           setTimeout(function() { resolve(null); }, 8000);
         })
       `,
@@ -392,7 +409,21 @@ function guessMimeType(url: string): string {
   if (l.includes('.webp')) return 'image/webp';
   if (l.includes('.svg')) return 'image/svg+xml';
   if (l.includes('.avif')) return 'image/avif';
+  if (l.includes('.apng')) return 'image/apng';
+  if (l.includes('.tiff') || l.includes('.tif')) return 'image/tiff';
+  if (l.includes('.heic')) return 'image/heic';
+  if (l.includes('.heif')) return 'image/heif';
+  if (l.includes('.bmp')) return 'image/bmp';
+  if (l.includes('.ico')) return 'image/x-icon';
+  if (l.includes('.jfif')) return 'image/jpeg';
+  if (l.includes('.jp2')) return 'image/jp2';
+  if (l.includes('.jxl')) return 'image/jxl';
   return 'image/png';
+}
+
+/** Check if a MIME type is natively supported by Figma's createImage() */
+function isFigmaSupported(mime: string): boolean {
+  return mime === 'image/png' || mime === 'image/jpeg' || mime === 'image/gif';
 }
 
 // ─────────────────────────────────────────────

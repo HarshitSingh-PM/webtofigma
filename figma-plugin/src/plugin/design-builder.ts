@@ -344,13 +344,35 @@ export class DesignBuilder {
       try {
         const imageData = await this.loadImageData(asset.data);
         if (imageData) {
-          const image = figma.createImage(imageData);
-          rect.fills = [{
-            type: 'IMAGE',
-            imageHash: image.hash,
-            scaleMode: (w2fNode.imageScaleMode as 'FILL' | 'FIT' | 'CROP' | 'TILE') || 'FILL',
-          }];
-          this.imageStats.loaded++;
+          if (typeof imageData === 'string' && imageData.indexOf('SVG:') === 0) {
+            // SVG — use createNodeFromSvg, replace rect with SVG node
+            try {
+              const svgContent = imageData.substring(4);
+              const svgNode = figma.createNodeFromSvg(svgContent);
+              svgNode.name = w2fNode.name;
+              svgNode.x = rect.x;
+              svgNode.y = rect.y;
+              svgNode.resize(w, h);
+              // Remove the rect, return the SVG node instead
+              rect.remove();
+              this.imageStats.loaded++;
+              return svgNode as any;
+            } catch {
+              // SVG parsing failed — try as raster fallback
+              rect.fills = [{ type: 'SOLID', color: { r: 0.9, g: 0.9, b: 0.95 } }];
+              this.imageStats.failed++;
+              this.imageStats.errors.push('SVG_PARSE_FAIL');
+            }
+          } else {
+            // Raster image (PNG, JPEG, GIF)
+            const image = figma.createImage(imageData as Uint8Array);
+            rect.fills = [{
+              type: 'IMAGE',
+              imageHash: image.hash,
+              scaleMode: (w2fNode.imageScaleMode as 'FILL' | 'FIT' | 'CROP' | 'TILE') || 'FILL',
+            }];
+            this.imageStats.loaded++;
+          }
         } else {
           this.imageStats.failed++;
           const dataPreview = typeof asset.data === 'string' ? asset.data.substring(0, 50) : 'no-data';
@@ -449,8 +471,8 @@ export class DesignBuilder {
         const asset = this.doc.assets.images[imageRef];
         try {
           const imageData = await this.loadImageData(asset.data);
-          if (imageData) {
-            const image = figma.createImage(imageData);
+          if (imageData && typeof imageData !== 'string') {
+            const image = figma.createImage(imageData as Uint8Array);
             paints[index] = {
               type: 'IMAGE',
               imageHash: image.hash,
@@ -500,10 +522,44 @@ export class DesignBuilder {
     return [[cos, sin, 0.5 - cos * 0.5 - sin * 0.5], [-sin, cos, 0.5 + sin * 0.5 - cos * 0.5]];
   }
 
-  private async loadImageData(dataOrUrl: string): Promise<Uint8Array | null> {
+  /**
+   * Load image data from data URI or URL.
+   * Returns Uint8Array for figma.createImage(), or 'SVG:...' string for SVGs.
+   * Supports: PNG, JPEG, GIF (native Figma), SVG (via createNodeFromSvg),
+   * WebP, AVIF, TIFF, HEIC, HEIF, APNG (must be converted before reaching here).
+   */
+  private async loadImageData(dataOrUrl: string): Promise<Uint8Array | string | null> {
     try {
       if (dataOrUrl.startsWith('data:')) {
-        // Base64 data URI — decode without atob (not available in Figma sandbox)
+        const mimeMatch = dataOrUrl.match(/^data:([^;,]+)/);
+        const mime = mimeMatch ? mimeMatch[1] : '';
+
+        // SVG — return raw SVG for createNodeFromSvg
+        if (mime === 'image/svg+xml') {
+          const base64Part = dataOrUrl.split(',')[1];
+          if (!base64Part) return null;
+          // Decode base64 to SVG string
+          const bytes = this.decodeBase64(base64Part);
+          var svgString = '';
+          for (var si = 0; si < bytes.length; si++) {
+            svgString += String.fromCharCode(bytes[si]);
+          }
+          // Handle URL-encoded SVGs
+          if (svgString.indexOf('%3C') >= 0 || svgString.indexOf('%3c') >= 0) {
+            try { svgString = decodeURIComponent(svgString); } catch {}
+          }
+          return 'SVG:' + svgString;
+        }
+
+        // PNG, JPEG, GIF — native Figma support
+        if (mime === 'image/png' || mime === 'image/jpeg' || mime === 'image/gif') {
+          const base64 = dataOrUrl.split(',')[1];
+          if (!base64) return null;
+          return this.decodeBase64(base64);
+        }
+
+        // Unsupported format that slipped through (WebP, AVIF, TIFF, HEIC, etc.)
+        // Try decoding anyway — Figma might handle some formats
         const base64 = dataOrUrl.split(',')[1];
         if (!base64) return null;
         return this.decodeBase64(base64);
