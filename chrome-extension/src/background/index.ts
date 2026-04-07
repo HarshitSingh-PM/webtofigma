@@ -299,12 +299,21 @@ async function fetchImageData(
           url: absoluteUrl,
         });
         if (result && result.content && result.base64Encoded) {
-          const mime = guessMimeType(absoluteUrl);
+          // Detect actual format from the content bytes, not URL extension
+          let mime = guessMimeType(absoluteUrl);
+          try {
+            const sampleBytes = Uint8Array.from(
+              atob(result.content.substring(0, 20)),
+              (c: string) => c.charCodeAt(0)
+            );
+            mime = detectMimeFromBytes(sampleBytes);
+          } catch { /* use URL-based guess */ }
+
           // Only return Figma-supported formats directly
           if (mime === 'image/png' || mime === 'image/jpeg' || mime === 'image/gif') {
             return `data:${mime};base64,${result.content}`;
           }
-          // Unsupported format — convert via canvas using the data URI
+          // Unsupported format — convert via canvas
           const dataUri = `data:${mime};base64,${result.content}`;
           const converted = await renderImageToPNG(tabId, dataUri);
           if (converted) return converted;
@@ -520,13 +529,16 @@ function detectMimeFromBytes(bytes: Uint8Array): string {
   if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) return 'image/gif';
   // WebP: 52 49 46 46 (RIFF)
   if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46) return 'image/webp';
+  // SVG: 3C 3F 78 6D (<?xm) or 3C 73 76 67 (<svg)
+  if ((bytes[0] === 0x3C && bytes[1] === 0x3F && bytes[2] === 0x78 && bytes[3] === 0x6D) ||
+      (bytes[0] === 0x3C && bytes[1] === 0x73 && bytes[2] === 0x76 && bytes[3] === 0x67)) return 'image/svg+xml';
   // AVIF/HEIF: 00 00 00 xx 66 74 79 70
   if (bytes.length > 8 && bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70) return 'image/avif';
   // BMP: 42 4D
   if (bytes[0] === 0x42 && bytes[1] === 0x4D) return 'image/bmp';
   // TIFF: 49 49 or 4D 4D
   if ((bytes[0] === 0x49 && bytes[1] === 0x49) || (bytes[0] === 0x4D && bytes[1] === 0x4D)) return 'image/tiff';
-  return 'image/png'; // Default
+  return 'image/png';
 }
 
 function guessMimeType(url: string): string {
