@@ -319,6 +319,13 @@ async function fetchImageData(
     }
   } catch { /* */ }
 
+  // Fallback 3: Screenshot the image element directly via CDP
+  // This captures rendered pixels regardless of CORS — works for any visible image
+  try {
+    const screenshotData = await screenshotImageElement(tabId, absoluteUrl);
+    if (screenshotData) return screenshotData;
+  } catch { /* */ }
+
   return null;
 }
 
@@ -375,6 +382,96 @@ async function renderImageToPNG(tabId: number, url: string): Promise<string | nu
     if (value && typeof value === 'string' && value.startsWith('data:image/')) {
       return value;
     }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Screenshot an image element directly using CDP Page.captureScreenshot.
+ * Finds the <img> element with the given src, gets its bounding box,
+ * and captures a screenshot of just that region. Works regardless of CORS.
+ */
+async function screenshotImageElement(tabId: number, url: string): Promise<string | null> {
+  try {
+    // Find the image element and get its bounding box
+    const boxResult = await cdpSend(tabId, 'Runtime.evaluate', {
+      expression: `
+        (function() {
+          var imgs = document.querySelectorAll('img');
+          for (var i = 0; i < imgs.length; i++) {
+            var img = imgs[i];
+            if ((img.src === ${JSON.stringify(url)} || img.currentSrc === ${JSON.stringify(url)}) && img.naturalWidth > 0) {
+              var rect = img.getBoundingClientRect();
+              if (rect.width > 0 && rect.height > 0) {
+                return {
+                  x: rect.left + window.scrollX,
+                  y: rect.top + window.scrollY,
+                  width: rect.width,
+                  height: rect.height,
+                  scrollX: window.scrollX,
+                  scrollY: window.scrollY
+                };
+              }
+            }
+          }
+          return null;
+        })()
+      `,
+      returnByValue: true,
+    });
+
+    const box = boxResult && boxResult.result && boxResult.result.value;
+    if (!box || box.width <= 0 || box.height <= 0) return null;
+
+    // Scroll the element into view first
+    await cdpSend(tabId, 'Runtime.evaluate', {
+      expression: `window.scrollTo(0, ${Math.max(0, box.y - 100)})`,
+    });
+    await new Promise(r => setTimeout(r, 200));
+
+    // Recalculate position after scroll
+    const newBoxResult = await cdpSend(tabId, 'Runtime.evaluate', {
+      expression: `
+        (function() {
+          var imgs = document.querySelectorAll('img');
+          for (var i = 0; i < imgs.length; i++) {
+            var img = imgs[i];
+            if ((img.src === ${JSON.stringify(url)} || img.currentSrc === ${JSON.stringify(url)}) && img.naturalWidth > 0) {
+              var rect = img.getBoundingClientRect();
+              if (rect.width > 0 && rect.height > 0) {
+                return { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+              }
+            }
+          }
+          return null;
+        })()
+      `,
+      returnByValue: true,
+    });
+
+    const newBox = newBoxResult && newBoxResult.result && newBoxResult.result.value;
+    if (!newBox || newBox.width <= 0 || newBox.height <= 0 || newBox.y < 0) return null;
+
+    // Capture screenshot of just this region
+    const screenshot = await cdpSend(tabId, 'Page.captureScreenshot', {
+      format: 'png',
+      clip: {
+        x: Math.max(0, newBox.x),
+        y: Math.max(0, newBox.y),
+        width: Math.min(newBox.width, 4096),
+        height: Math.min(newBox.height, 4096),
+        scale: 1,
+      },
+    });
+
+    if (screenshot && screenshot.data) {
+      // Scroll back to top
+      await cdpSend(tabId, 'Runtime.evaluate', { expression: 'window.scrollTo(0, 0)' });
+      return `data:image/png;base64,${screenshot.data}`;
+    }
+
     return null;
   } catch {
     return null;
