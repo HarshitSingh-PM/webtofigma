@@ -45,6 +45,20 @@ export class CaptureEngine {
       await this.triggerLazyLoading();
     }
 
+    // Wait for dynamically rendered content (Angular/React components)
+    // Check if new images are still appearing
+    let prevImgCount = document.querySelectorAll('img').length;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      const currentCount = document.querySelectorAll('img').length;
+      if (currentCount > prevImgCount) {
+        // New images appeared — wait more
+        prevImgCount = currentCount;
+      } else {
+        break; // Stable
+      }
+    }
+
     // Disable animations/transitions for clean capture
     this.disableAnimations();
 

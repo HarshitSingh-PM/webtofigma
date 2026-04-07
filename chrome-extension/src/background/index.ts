@@ -106,6 +106,12 @@ async function startCapture(
 
     updateState({ progress: 5 });
 
+    // Wait for SPA rendering — Angular/React apps need time to fetch data and render
+    // This gives dynamic components time to load their content (car listings, etc.)
+    await new Promise((r) => setTimeout(r, 3000));
+
+    updateState({ progress: 10 });
+
     // Step 1: Inject and run content script — main frame only (avoid extension iframes)
     await chrome.scripting.executeScript({ target: { tabId, allFrames: false }, files: ['content.js'] });
 
