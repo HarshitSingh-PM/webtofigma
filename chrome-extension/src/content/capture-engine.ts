@@ -35,6 +35,7 @@ export class CaptureEngine {
   private nodeNamer = new NodeNamer();
   private nodeIdCounter = 0;
   private colorMap = new Map<string, { color: W2FColor; count: number }>();
+  private _debugClipped: Array<{ tag: string; cls: string; w: number; h: number; reason: string }> = [];
 
   async capture(options: CaptureOptions): Promise<W2FDocument> {
     const deviceType = options.deviceType || this.detectDeviceType();
@@ -106,12 +107,17 @@ export class CaptureEngine {
           fonts: this.assetCollector.getFonts(),
         },
         colorPalette,
-        metadata: {
+        metadata: Object.assign({
           captureMode: options.mode,
           deviceType,
           theme: this.detectTheme(),
           userAgent: navigator.userAgent,
-        },
+        }, {
+          _clippedImages: this._debugClipped.slice(0, 30),
+          _totalImgTags: document.querySelectorAll('img').length,
+          _capturedImgNodes: rootNode ? this.countImgNodes(rootNode) : 0,
+          _skippedImgs: this.findSkippedImages(),
+        }) as any,
       };
 
       return doc;
@@ -142,15 +148,73 @@ export class CaptureEngine {
 
       if (clips) {
         const ancestorRect = ancestor.getBoundingClientRect();
-        // Check if child is completely outside this clipping ancestor
         const outsideX = childRect.right < ancestorRect.left - 2 || childRect.left > ancestorRect.right + 2;
         const outsideY = childRect.bottom < ancestorRect.top - 2 || childRect.top > ancestorRect.bottom + 2;
-        if (outsideX || outsideY) return true;
+        if (outsideX || outsideY) {
+          const tag = element.tagName?.toLowerCase() || '?';
+          if (tag === 'img' || tag === 'picture' || tag === 'svg') {
+            this._debugClipped.push({
+              tag,
+              cls: (element.className && typeof element.className === 'string') ? element.className.substring(0, 60) : '',
+              w: Math.round(childRect.width),
+              h: Math.round(childRect.height),
+              reason: `ancestor=${ancestor.tagName} aRect=${Math.round(ancestorRect.left)},${Math.round(ancestorRect.top)},${Math.round(ancestorRect.width)}x${Math.round(ancestorRect.height)} childRect=${Math.round(childRect.left)},${Math.round(childRect.top)}`,
+            });
+          }
+          return true;
+        }
       }
 
       ancestor = ancestor.parentElement;
     }
     return false;
+  }
+
+  /** Find WHY img elements are not captured */
+  private findSkippedImages(): any[] {
+    const results: any[] = [];
+    const allImgs = document.querySelectorAll('img');
+    for (let i = 0; i < Math.min(allImgs.length, 400); i++) {
+      const img = allImgs[i] as HTMLImageElement;
+      const rect = img.getBoundingClientRect();
+      const style = window.getComputedStyle(img);
+      const w = rect.width;
+      const h = rect.height;
+      const src = (img.currentSrc || img.src || '').substring(0, 80);
+
+      // Only check images that look like car photos (from CDN)
+      if (!src.includes('CarsPhoto') && !src.includes('photos-thumbs') && !src.includes('frontView')) continue;
+
+      let skipReason = 'unknown';
+      if (style.display === 'none') skipReason = 'display:none';
+      else if (style.visibility === 'hidden') skipReason = 'visibility:hidden';
+      else if (w === 0 && h === 0) skipReason = 'zero-size';
+      else if (style.opacity === '0') skipReason = 'opacity:0';
+      else {
+        // Check if any ancestor was skipped
+        let ancestor = img.parentElement;
+        let depth = 0;
+        while (ancestor && ancestor !== document.body && depth < 30) {
+          const aStyle = window.getComputedStyle(ancestor);
+          const aRect = ancestor.getBoundingClientRect();
+          if (aStyle.display === 'none') { skipReason = `ancestor[${depth}].display:none (${ancestor.tagName})`; break; }
+          if (aStyle.visibility === 'hidden') { skipReason = `ancestor[${depth}].visibility:hidden`; break; }
+          if (aRect.width === 0 && aRect.height === 0) { skipReason = `ancestor[${depth}].zero-size (${ancestor.tagName}.${(ancestor.className||'').toString().substring(0,30)})`; break; }
+          ancestor = ancestor.parentElement;
+          depth++;
+        }
+        if (skipReason === 'unknown') skipReason = 'VISIBLE-BUT-NOT-CAPTURED';
+      }
+
+      results.push({ src: src.substring(0, 60), w: Math.round(w), h: Math.round(h), reason: skipReason });
+    }
+    return results.slice(0, 20);
+  }
+
+  private countImgNodes(node: W2FNode): number {
+    let count = node.type === 'IMAGE' ? 1 : 0;
+    for (const c of node.children) count += this.countImgNodes(c);
+    return count;
   }
 
   private generateId(): string {
@@ -298,9 +362,48 @@ export class CaptureEngine {
 
     const rect = element.getBoundingClientRect();
 
-    // Skip zero-size elements (unless they're text containers)
-    if (rect.width === 0 && rect.height === 0 && !element.textContent?.trim()) {
-      return null;
+    // Skip zero-size elements — BUT only if they have no children with content
+    // Wrapper elements like <a>, <picture> may have 0x0 rect but contain visible children
+    if (rect.width === 0 && rect.height === 0) {
+      const hasChildren = element.children.length > 0;
+      const hasText = !!element.textContent?.trim();
+      if (!hasChildren && !hasText) {
+        return null;
+      }
+      // Zero-size wrapper with children: don't create a node for it,
+      // but DO capture its children by treating it as transparent wrapper
+      if (hasChildren) {
+        const wrapperNode: W2FNode = {
+          id: this.generateId(),
+          type: 'FRAME',
+          name: this.nodeNamer.generateName(element, tagName, depth),
+          x: 0, y: 0, width: 0, height: 0,
+          visible: true, opacity: 1,
+          clipContent: false,
+          fills: [], strokes: [], effects: [], children: [],
+        };
+        // Capture children with parent's offset (pass through)
+        await this.captureChildren(element, wrapperNode, parentX, parentY, depth);
+        // Return children directly (flatten the zero-size wrapper)
+        if (wrapperNode.children.length === 1) {
+          return wrapperNode.children[0];
+        } else if (wrapperNode.children.length > 1) {
+          // Multiple children — need a container, use first child's position
+          wrapperNode.x = wrapperNode.children[0].x;
+          wrapperNode.y = wrapperNode.children[0].y;
+          let maxR = 0, maxB = 0;
+          for (const c of wrapperNode.children) {
+            const r = c.x + c.width - wrapperNode.x;
+            const b = c.y + c.height - wrapperNode.y;
+            if (r > maxR) maxR = r;
+            if (b > maxB) maxB = b;
+          }
+          wrapperNode.width = maxR;
+          wrapperNode.height = maxB;
+          return wrapperNode;
+        }
+        return null;
+      }
     }
 
     const scrollX = window.scrollX;
