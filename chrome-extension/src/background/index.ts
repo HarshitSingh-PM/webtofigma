@@ -106,9 +106,10 @@ async function startCapture(
 
     updateState({ progress: 5 });
 
-    // Wait for SPA rendering — Angular/React apps need time to fetch data and render
-    // This gives dynamic components time to load their content (car listings, etc.)
-    await new Promise((r) => setTimeout(r, 3000));
+    // Wait for SPA rendering — Angular/React/Next.js apps fetch API data
+    // and render components dynamically. We need to wait for this to complete.
+    // 5 seconds is enough for most SPAs to finish their initial render cycle.
+    await new Promise((r) => setTimeout(r, 5000));
 
     updateState({ progress: 10 });
 
