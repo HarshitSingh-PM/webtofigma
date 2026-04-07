@@ -150,6 +150,7 @@ async function startCapture(
       // Collect all image URLs from the document
       const imageUrls = collectImageUrls(doc);
       updateState({ progress: 50 });
+      chrome.runtime.sendMessage({ action: 'image-progress', loaded: 0, total: imageUrls.length }).catch(() => {});
 
       // Fetch images via CDP and regular fetch in parallel
       const totalImages = imageUrls.length;
@@ -177,6 +178,7 @@ async function startCapture(
           }
           fetched++;
           updateState({ progress: 50 + Math.round((fetched / totalImages) * 30) });
+          chrome.runtime.sendMessage({ action: 'image-progress', loaded: fetchedOk, total: totalImages, failed: fetched - fetchedOk }).catch(() => {});
         }));
       }
 

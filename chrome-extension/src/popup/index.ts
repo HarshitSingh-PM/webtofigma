@@ -36,6 +36,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (message.action === 'state-update') {
       updateUI(message);
     }
+    if (message.action === 'image-progress') {
+      showStatus(`Loading images: ${message.loaded}/${message.total}${message.failed ? ` (${message.failed} failed)` : ''}`,
+        50 + Math.round((message.loaded / Math.max(1, message.total)) * 30));
+    }
   });
 
   // Check current state
