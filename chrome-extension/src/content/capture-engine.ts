@@ -183,20 +183,49 @@ export class CaptureEngine {
       await new Promise((r) => setTimeout(r, 200));
     }
 
-    // Force all lazy images to load by setting their src from data-src
+    // Force all lazy images to load
     try {
+      // Strategy 1: Set src from data-src/data-lazy attributes
       const lazyImages = document.querySelectorAll('img[data-src], img[data-lazy], img[loading="lazy"]');
       lazyImages.forEach((img: Element) => {
         const htmlImg = img as HTMLImageElement;
-        const dataSrc = htmlImg.getAttribute('data-src') || htmlImg.getAttribute('data-lazy');
-        if (dataSrc && !htmlImg.src) {
+        const dataSrc = htmlImg.getAttribute('data-src')
+          || htmlImg.getAttribute('data-lazy')
+          || htmlImg.getAttribute('data-original');
+        if (dataSrc && (!htmlImg.src || htmlImg.src === 'data:' || htmlImg.src.length < 20)) {
           htmlImg.src = dataSrc;
         }
-        // Remove loading=lazy to force immediate load
         htmlImg.removeAttribute('loading');
       });
-      // Wait for images to load
-      await new Promise((r) => setTimeout(r, 1500));
+
+      // Strategy 2: Trigger srcset loading by scrolling each image into view
+      const allImages = document.querySelectorAll('img');
+      for (let i = 0; i < allImages.length; i++) {
+        const img = allImages[i] as HTMLImageElement;
+        if (!img.complete || img.naturalWidth === 0) {
+          img.scrollIntoView({ block: 'center' });
+          await new Promise((r) => setTimeout(r, 50));
+        }
+      }
+
+      // Wait for all images to finish loading
+      await new Promise((r) => setTimeout(r, 2000));
+
+      // Strategy 3: Wait for any remaining images
+      const pendingImages = Array.from(document.querySelectorAll('img')).filter(
+        (img: Element) => !(img as HTMLImageElement).complete
+      );
+      if (pendingImages.length > 0) {
+        await Promise.race([
+          Promise.all(pendingImages.map((img: Element) =>
+            new Promise((resolve) => {
+              (img as HTMLImageElement).onload = resolve;
+              (img as HTMLImageElement).onerror = resolve;
+            })
+          )),
+          new Promise((r) => setTimeout(r, 5000)), // Max 5s wait
+        ]);
+      }
     } catch { /* */ }
 
     // Scroll back to top
